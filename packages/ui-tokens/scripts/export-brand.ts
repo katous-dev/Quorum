@@ -5,27 +5,94 @@ import { darkTokens } from "../src/index.ts";
 
 const root = new URL("../../../", import.meta.url);
 const path = (name: string) => fileURLToPath(new URL(name, root));
-const source = path("packages/ui-tokens/assets/Rakazo.icon/Assets/orange-bot.png");
 
-// Match the Icon Composer portrait: the character sits 90 points below center.
-const portrait = await sharp(source).resize(1024, 1024).png().toBuffer();
-async function framed(background: string) {
-  return sharp({ create: { width: 1024, height: 1114, channels: 4, background } })
-    .composite([{ input: portrait, top: 90, left: 0 }])
-    .extract({ left: 0, top: 0, width: 1024, height: 1024 })
-    .png()
-    .toBuffer();
+// The canonical Quorum logo source
+const sourceUser = path("packages/ui-tokens/assets/quorum-source.jpg");
+
+// Generate the high-res 1024x1024 PNG with dark background matching darkTokens.background
+// Original image has background #0c0c0e, darkTokens.background is #141414
+const originalRaw = await sharp(sourceUser).resize(1024, 1024).raw().toBuffer();
+
+// Extract clean transparent emblem
+const transparentRgba = Buffer.alloc(1024 * 1024 * 4);
+const monochromeRgba = Buffer.alloc(1024 * 1024 * 4);
+
+for (let i = 0; i < 1024 * 1024; i++) {
+  const r = originalRaw[i * 3] ?? 0;
+  const g = originalRaw[i * 3 + 1] ?? 0;
+  const b = originalRaw[i * 3 + 2] ?? 0;
+  const max = Math.max(r, g, b);
+
+  transparentRgba[i * 4] = r;
+  transparentRgba[i * 4 + 1] = g;
+  transparentRgba[i * 4 + 2] = b;
+
+  // Monochrome is pure white
+  monochromeRgba[i * 4] = 255;
+  monochromeRgba[i * 4 + 1] = 255;
+  monochromeRgba[i * 4 + 2] = 255;
+
+  if (max < 25) {
+    transparentRgba[i * 4 + 3] = 0;
+    monochromeRgba[i * 4 + 3] = 0;
+  } else if (max < 45) {
+    const alpha = Math.round(((max - 25) / 20) * 255);
+    transparentRgba[i * 4 + 3] = alpha;
+    monochromeRgba[i * 4 + 3] = alpha;
+  } else {
+    transparentRgba[i * 4 + 3] = 255;
+    monochromeRgba[i * 4 + 3] = 255;
+  }
 }
+
+const transparentEmblem = await sharp(transparentRgba, {
+  raw: { width: 1024, height: 1024, channels: 4 },
+})
+  .png()
+  .toBuffer();
+
+// Save transparent emblem for Apple icon composer & token assets
+await sharp(transparentEmblem).toFile(
+  path("packages/ui-tokens/assets/Rakazo.icon/Assets/orange-bot.png"),
+);
+await sharp(transparentEmblem).toFile(path("packages/ui-tokens/assets/quorum-emblem.png"));
+
+// Save monochrome icon for Android
+const monochromeBuffer = await sharp(monochromeRgba, {
+  raw: { width: 1024, height: 1024, channels: 4 },
+})
+  .png()
+  .toBuffer();
+await sharp(monochromeBuffer).toFile(path("apps/mobile/assets/monochrome-icon.png"));
+
+// Square icon: the original emblem on darkTokens.background (#141414)
+// Composite transparent emblem onto solid #141414 background
+const square = await sharp({
+  create: {
+    width: 1024,
+    height: 1024,
+    channels: 4,
+    background: darkTokens.background,
+  },
+})
+  .composite([{ input: transparentEmblem, left: 0, top: 0 }])
+  .png()
+  .toBuffer();
+
+await sharp(square).toFile(path("packages/ui-tokens/assets/quorum-square.png"));
+
+// Squircle mask for rounded icon / favicons
 const mask = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"><rect width="1024" height="1024" rx="200" fill="white"/></svg>',
 );
+
 async function roundedCorners(input: Buffer) {
   return sharp(input)
     .composite([{ input: mask, blend: "dest-in" }])
     .png()
     .toBuffer();
 }
-const square = await framed(darkTokens.background);
+
 const rounded = await roundedCorners(square);
 
 async function png(input: Buffer, name: string, size: number) {
@@ -52,6 +119,7 @@ async function ico(input: Buffer, name: string, sizes: number[]) {
   await writeFile(path(name), Buffer.concat([header, ...frames]));
 }
 
+// Web & Marketing sites
 for (const app of ["web", "www"]) {
   const publicDir = `apps/${app}/public`;
   await png(rounded, `${publicDir}/favicon-16x16.png`, 16);
@@ -62,26 +130,47 @@ for (const app of ["web", "www"]) {
   await png(square, `${publicDir}/icon-512.png`, 512);
   await ico(rounded, `${publicDir}/favicon.ico`, [16, 32, 48]);
 }
+
 await mkdir(path("apps/www/public/brand"), { recursive: true });
 await png(rounded, "apps/www/public/brand/rakazo-mark.png", 256);
-await png(rounded, "apps/mobile/assets/favicon.png", 128);
-await png(square, "apps/desktop/assets/icon.png", 1024);
-await ico(rounded, "apps/desktop/assets/icon.ico", [16, 32, 48, 64, 128, 256]);
+await png(rounded, "apps/www/public/brand/kit/rakazo-icon.png", 1024);
+await png(square, "apps/www/public/brand/kit/rakazo-logo.png", 1024);
 
-// The splash shows the character alone, with no plate, so it sits on either splash colour.
-// Keep the existing transparent padding so its visual size stays stable.
-await sharp(await roundedCorners(await framed("transparent")))
+// Mobile assets
+await png(rounded, "apps/mobile/assets/favicon.png", 128);
+await png(square, "apps/mobile/assets/icon.png", 1024);
+await sharp(transparentEmblem).toFile(path("apps/mobile/assets/adaptive-icon.png"));
+await sharp({
+  create: {
+    width: 1024,
+    height: 1024,
+    channels: 4,
+    background: darkTokens.background,
+  },
+})
+  .png()
+  .toFile(path("apps/mobile/assets/icon-background.png"));
+
+// Mobile splash: emblem alone with transparent padding
+await sharp(transparentEmblem)
   .resize(620, 620)
   .extend({ top: 202, bottom: 202, left: 202, right: 202, background: "transparent" })
   .png()
   .toFile(path("apps/mobile/assets/splash-icon.png"));
 
-// Android notification icons must be white alpha silhouettes, with transparent eyes.
-const silhouette = await sharp(path("apps/mobile/assets/monochrome-icon.png"))
+// Android notification silhouette (72x72)
+const notifSilhouette = await sharp(monochromeBuffer)
   .resize(72, 72)
   .extractChannel("alpha")
   .toBuffer();
 await sharp({ create: { width: 72, height: 72, channels: 3, background: "white" } })
-  .joinChannel(silhouette)
+  .joinChannel(notifSilhouette)
   .png()
   .toFile(path("apps/mobile/assets/notification-icon.png"));
+
+// Desktop assets
+await png(square, "apps/desktop/assets/icon.png", 1024);
+await png(rounded, "apps/desktop/assets/icon-macos.png", 1024);
+await ico(rounded, "apps/desktop/assets/icon.ico", [16, 32, 48, 64, 128, 256]);
+
+console.log("All brand assets exported successfully!");
