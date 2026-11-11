@@ -48,6 +48,15 @@ vi.mock("./SpaceSettingOverrides", () => ({
 vi.mock("../components/SpaceMembersSettings", () => ({
   SpaceMembersSettings: () => <div data-testid="space-members-settings" />,
 }));
+vi.mock("../lib/space-rpc", () => ({
+  useSpaceRpc: () => ({
+    spaces: {
+      setLocalProjectPath: vi
+        .fn()
+        .mockResolvedValue({ id: "space-1", localProjectPath: "/mock/path" }),
+    },
+  }),
+}));
 
 import { SpaceSettingsPanel } from "./SpaceSettingsPanel";
 

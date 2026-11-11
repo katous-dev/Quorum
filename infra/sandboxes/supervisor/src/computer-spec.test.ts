@@ -50,6 +50,7 @@ import {
   resolveScreenNetworkMode,
   resolveScreenPublishTarget,
   resolveSpaceComputerLimit,
+  resolveSpaceProjectMount,
   resolveTeamScreenLimit,
   screenPeerNetworkConnectOptions,
   screenPorts,
@@ -368,6 +369,41 @@ describe("graphical computer spec", () => {
     expect(
       resolveComputerMounts("/opt/shared:/mnt/x,/varnish:/mnt/y,/srv/run:/mnt/z", protectedPaths),
     ).toHaveLength(3);
+  });
+
+  it("resolves space project mounts for Windows and POSIX paths", () => {
+    expect(resolveSpaceProjectMount(undefined)).toBeUndefined();
+    expect(resolveSpaceProjectMount("")).toBeUndefined();
+    expect(resolveSpaceProjectMount("   ")).toBeUndefined();
+    expect(resolveSpaceProjectMount("E:\\Projects\\WebShop")).toEqual({
+      source: "E:/Projects/WebShop",
+      target: "/mnt/project",
+      readOnly: false,
+    });
+    expect(resolveSpaceProjectMount("E:\\Projects\\WebShop\\")).toEqual({
+      source: "E:/Projects/WebShop",
+      target: "/mnt/project",
+      readOnly: false,
+    });
+    expect(resolveSpaceProjectMount("E:\\")).toEqual({
+      source: "E:/",
+      target: "/mnt/project",
+      readOnly: false,
+    });
+    expect(resolveSpaceProjectMount("E:/Projects/WebShop/")).toEqual({
+      source: "E:/Projects/WebShop",
+      target: "/mnt/project",
+      readOnly: false,
+    });
+    expect(resolveSpaceProjectMount("/mnt/e/Projects/WebShop")).toEqual({
+      source: "/mnt/e/Projects/WebShop",
+      target: "/mnt/project",
+      readOnly: false,
+    });
+    expect(() => resolveSpaceProjectMount("relative/folder")).toThrow(/must be an absolute path/);
+    expect(() => resolveSpaceProjectMount("E:\\Projects\\..\\secret")).toThrow(
+      /must not contain \.\./,
+    );
   });
 
   it("matches a computer's DNS servers to the configured ones", () => {

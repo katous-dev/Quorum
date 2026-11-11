@@ -115,7 +115,7 @@ export function teamBotWorkspaceDirectory(botId: string): string {
 export function teamWorkspaceInstruction(botId: string): string {
   const home = teamBotWorkspaceDirectory(botId);
   const sharedFromShell = `${path.posix.relative(home, "shared")}/`;
-  return `Your Team Computer home is ${home}. Relative file paths and shell working directories start there. Put intentionally shared work under shared/. File tools resolve shared/ and bots/ from the Team root, but shell commands do not: from your home, a shell command reaches shared work as ${sharedFromShell}, and a shell cwd of shared starts in it. Other bots' folders are visible under bots/; treat them as their working areas.`;
+  return `Your Team Computer home is ${home}. Relative file paths and shell working directories start there. Put intentionally shared work under shared/. If a local project folder is attached to this space, it is mounted at project/ (and /mnt/project) with direct read and write access to the host files. File tools resolve shared/ and bots/ from the Team root, but shell commands do not: from your home, a shell command reaches shared work as ${sharedFromShell}, and a shell cwd of shared starts in it. Other bots' folders are visible under bots/; treat them as their working areas.`;
 }
 
 export function resolveBotWorkspacePath(

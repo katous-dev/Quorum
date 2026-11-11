@@ -360,6 +360,34 @@ export function resolveComputerMounts(
   return mounts;
 }
 
+/**
+ * Resolves a Space's project folder into a computer mount.
+ * Supports Windows drive paths (e.g. E:\..., E:/...) and POSIX absolute paths.
+ */
+export function resolveSpaceProjectMount(
+  localProjectPath: string | undefined,
+): ComputerMount | undefined {
+  if (!localProjectPath) return undefined;
+  const raw = localProjectPath.trim();
+  if (!raw) return undefined;
+  const parts = raw.split(/[/\\]/);
+  if (parts.includes("..")) {
+    throw new Error(`Invalid local project path "${raw}": path must not contain ..`);
+  }
+  const isAbs = path.posix.isAbsolute(raw) || /^[a-zA-Z]:[/\\]/.test(raw);
+  if (!isAbs) {
+    throw new Error(`Invalid local project path "${raw}": path must be an absolute path`);
+  }
+  const forward = raw.replace(/\\/g, "/");
+  const normalized =
+    forward === "/" || /^[a-zA-Z]:\/$/.test(forward) ? forward : forward.replace(/\/+$/, "");
+  return {
+    source: normalized,
+    target: "/mnt/project",
+    readOnly: false,
+  };
+}
+
 function computerMountSettings(mount: ComputerMount): Docker.MountSettings {
   return {
     Type: "bind",

@@ -370,6 +370,7 @@ export type ExternalConversation = z.infer<typeof ExternalConversationSchema>;
 export const SpaceSchema = z.object({
   id: Id,
   name: z.string(),
+  localProjectPath: z.string().nullable().optional(),
   isDefault: z.boolean(),
   /** True when the space has any bot or group, including archived. */
   hasContent: z.boolean(),

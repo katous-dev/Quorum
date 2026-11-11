@@ -34,6 +34,7 @@ import {
   SpaceMemberNotFoundError,
   SpaceNotFoundError,
   SpaceOwnerCannotLeaveError,
+  setSpaceLocalProjectPathForMember,
   setSpaceSettingOverride,
   spaceSettingOverrides,
 } from "@rakazo/db";
@@ -104,12 +105,13 @@ export function spacesRoutes(ctx: RouterContext) {
       // Seeds a Space whose id does not exist yet; the member limit is checked inside.
       create: authed.spaces.create.handler(({ context, input }) =>
         runAsSystem("create a Space for its member", async () => {
-          let space: { id: string; name: string };
+          let space: { id: string; name: string; localProjectPath: string | null };
           try {
             space = await createSpaceForMember(deps.prisma, {
               currentSpaceId: context.actor.spaceId,
               userId: context.actor.userId,
               name: input.name,
+              localProjectPath: input.localProjectPath,
             });
           } catch (error) {
             if (error instanceof SpaceLimitError || error instanceof InvalidSpaceNameError) {
@@ -129,6 +131,7 @@ export function spacesRoutes(ctx: RouterContext) {
           return {
             id: space.id,
             name: space.name,
+            localProjectPath: space.localProjectPath,
             isDefault: false,
             hasContent: false,
             canRename: true,
@@ -167,6 +170,37 @@ export function spacesRoutes(ctx: RouterContext) {
             }
             if (error instanceof InvalidSpaceNameError) {
               throw new ORPCError("BAD_REQUEST", { message: error.message });
+            }
+            if (error instanceof SpaceDeletionInProgressError) {
+              throw new ORPCError("CONFLICT", { message: error.message });
+            }
+            throw error;
+          }
+        }),
+      ),
+      // Updates local project path for the space
+      setLocalProjectPath: authed.spaces.setLocalProjectPath.handler(({ context, input }) =>
+        asMemberOf(deps.prisma, context.actor, input.spaceId, async () => {
+          try {
+            const updated = await setSpaceLocalProjectPathForMember(deps.prisma, {
+              currentSpaceId: context.actor.spaceId,
+              userId: context.actor.userId,
+              spaceId: input.spaceId,
+              localProjectPath: input.path,
+            });
+            await recordAuditEvent({
+              action: "space.renamed",
+              actor: { type: "user", id: context.actor.userId },
+              spaceId: updated.id,
+              target: { type: "space", id: updated.id, label: updated.localProjectPath ?? "none" },
+            });
+            return updated;
+          } catch (error) {
+            if (error instanceof SpaceNotFoundError) {
+              throw new ORPCError("NOT_FOUND", { message: error.message });
+            }
+            if (error instanceof CannotRenameSpaceAsNonOwnerError) {
+              throw new ORPCError("FORBIDDEN", { message: error.message });
             }
             if (error instanceof SpaceDeletionInProgressError) {
               throw new ORPCError("CONFLICT", { message: error.message });
@@ -402,6 +436,7 @@ async function memberSpaceNavigation(
       space: {
         select: {
           name: true,
+          localProjectPath: true,
           isDefault: true,
           deletingAt: true,
           _count: { select: { memberships: true } },
@@ -475,6 +510,7 @@ async function memberSpaceNavigation(
       return {
         id: membership.spaceId,
         name: membership.space.name,
+        localProjectPath: membership.space.localProjectPath,
         // Another person's default Space is not this member's default.
         isDefault: membership.space.isDefault && owner,
         hasContent: spacesWithContent.has(membership.spaceId),

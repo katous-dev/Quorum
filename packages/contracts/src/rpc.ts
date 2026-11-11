@@ -409,10 +409,17 @@ export const appContract = {
   },
   spaces: {
     list: oc.output(SpaceNavigationSchema),
-    create: oc.input(z.object({ name: spaceName })).output(SpaceSchema),
+    create: oc
+      .input(
+        z.object({ name: spaceName, localProjectPath: z.string().max(1024).nullable().optional() }),
+      )
+      .output(SpaceSchema),
     rename: oc
       .input(z.object({ spaceId: Id, name: spaceName }))
       .output(z.object({ id: Id, name: z.string() })),
+    setLocalProjectPath: oc
+      .input(z.object({ spaceId: Id, path: z.string().max(1024).nullable() }))
+      .output(z.object({ id: Id, localProjectPath: z.string().nullable() })),
     remove: oc
       .input(z.object({ spaceId: Id }))
       .output(z.object({ ok: z.literal(true), activeSpaceId: Id })),

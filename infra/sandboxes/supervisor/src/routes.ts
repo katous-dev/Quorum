@@ -33,6 +33,7 @@ import {
   homeVolumeMatches,
   hostComputerUser,
   resolveSpaceComputerLimit,
+  resolveSpaceProjectMount,
   screenPorts,
   screenUrlWithToken,
   xdotoolCommand,
@@ -151,10 +152,13 @@ app.post("/computers", async (c) => {
       botId: z.string().min(1),
       homePath: z.string().min(1),
       spaceId: z.string().min(1),
+      localProjectPath: z.string().optional(),
       ...computerLocaleFields,
     })
     .parse(await c.req.json());
   const locale = resolveComputerLocale(body);
+  const projectMount = resolveSpaceProjectMount(body.localProjectPath);
+  const desiredMounts = projectMount ? [...computerMounts, projectMount] : computerMounts;
   try {
     assertRequestIdentity(headers.botId, headers.spaceId, {
       botId: body.botId,
@@ -166,7 +170,7 @@ app.post("/computers", async (c) => {
       const runtimeInfo = await inspectSupervisorContainer();
       // A containerized supervisor's host paths (data directory, Docker socket) are known only now.
       assertComputerMountSources(
-        computerMounts,
+        desiredMounts,
         (runtimeInfo?.Mounts ?? []).map((mount) => mount.Source),
       );
       const networkMode = computerNetworkName(body.botId, runtimeInfo);
@@ -254,7 +258,7 @@ app.post("/computers", async (c) => {
           // DNS is fixed when a container is created, so a changed setting replaces it.
           computerDnsMatches(info.HostConfig.Dns, computerDns) &&
           // So are host mounts: an added, changed or removed one replaces the computer.
-          computerMountsMatch(info, computerMounts) &&
+          computerMountsMatch(info, desiredMounts) &&
           // So are the owner's time zone and language.
           computerLocaleMatches(info.Config.Env, locale) &&
           controlPublishOk &&
@@ -265,6 +269,14 @@ app.post("/computers", async (c) => {
         ) {
           const started = !info.State.Running;
           if (started) await existing.start();
+          if (projectMount) {
+            await runContainerCommand(existing, [
+              "ln",
+              "-sfn",
+              "/mnt/project",
+              "/home/rakazo/project",
+            ]).catch(() => undefined);
+          }
           return c.json({
             id: existing.id,
             image: COMPUTER_IMAGE,
@@ -319,7 +331,7 @@ app.post("/computers", async (c) => {
           controlToken: randomUUID(),
           publishControlPort: controlViaLoopback,
           dns: computerDns,
-          mounts: computerMounts,
+          mounts: desiredMounts,
           locale,
         });
         let container: Docker.Container | undefined;
@@ -350,6 +362,14 @@ app.post("/computers", async (c) => {
             removeNamedComputer,
           );
           await container.start();
+          if (projectMount) {
+            await runContainerCommand(container, [
+              "ln",
+              "-sfn",
+              "/mnt/project",
+              "/home/rakazo/project",
+            ]).catch(() => undefined);
+          }
         } catch (error) {
           // Never force removal: a lost start response may hide a running computer.
           // Docker also refuses network removal while any endpoint is attached.

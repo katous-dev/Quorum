@@ -346,7 +346,9 @@ export function ShellDialogs({
       {newSpaceOpen ? (
         <NewSpaceDialog
           onCancel={() => setNewSpaceOpen(false)}
-          onCreate={async (name) => (await rpc.spaces.create({ name })).id}
+          onCreate={async (name, localProjectPath) =>
+            (await rpc.spaces.create({ name, localProjectPath: localProjectPath || undefined })).id
+          }
           loadItems={() => rpc.availability.items()}
           chooseItems={async (spaceId, items) => {
             await rpc.availability.chooseForSpace({

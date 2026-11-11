@@ -149,6 +149,7 @@ export interface SandboxProvider {
        */
       timezone?: string;
       language?: string;
+      localProjectPath?: string;
     },
     context: AdapterContext,
   ): Promise<ComputerRef>;

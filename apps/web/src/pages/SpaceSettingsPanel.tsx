@@ -3,6 +3,7 @@ import { Button, Input } from "@rakazo/ui-web";
 import { useEffect, useId, useState } from "react";
 import { SettingsGroup, SettingsRow } from "../components/SettingsRows";
 import { SpaceMembersSettings } from "../components/SpaceMembersSettings";
+import { useSpaceRpc } from "../lib/space-rpc";
 import { SpaceSettingOverrides } from "./SpaceSettingOverrides";
 import type { SettingsSpace } from "./shell/dialogs";
 import { DeleteSpaceDialog } from "./shell/dialogs";
@@ -28,14 +29,20 @@ export function SpaceSettingsPanel({
   onBusyChange?: (busy: boolean) => void;
 }) {
   const { t } = useLingui();
+  const rpc = useSpaceRpc();
   const nameId = useId();
+  const pathId = useId();
   const [draft, setDraft] = useState(space.name);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pathDraft, setPathDraft] = useState(space.localProjectPath ?? "");
+  const [pathPending, setPathPending] = useState(false);
+  const [pathError, setPathError] = useState<string | null>(null);
+  const [pathSaved, setPathSaved] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [overridesBusy, setOverridesBusy] = useState(false);
   // A rename in flight holds the dialog open, so a failure is shown instead of lost on leaving.
-  const busy = pending || overridesBusy;
+  const busy = pending || pathPending || overridesBusy;
   useEffect(() => {
     onBusyChange?.(busy);
   }, [busy, onBusyChange]);
@@ -60,6 +67,32 @@ export function SpaceSettingsPanel({
       );
     } finally {
       setPending(false);
+    }
+  }
+
+  async function savePath() {
+    const trimmed = pathDraft.trim();
+    if (pathPending) return;
+    if (trimmed === (space.localProjectPath ?? "")) {
+      setPathError(null);
+      return;
+    }
+    setPathPending(true);
+    setPathError(null);
+    setPathSaved(false);
+    try {
+      await rpc.spaces.setLocalProjectPath({
+        spaceId: space.id,
+        path: trimmed || null,
+      });
+      space.localProjectPath = trimmed || null;
+      setPathSaved(true);
+    } catch (err) {
+      setPathError(
+        err instanceof Error && err.message.trim() ? err.message : t`Could not save project path`,
+      );
+    } finally {
+      setPathPending(false);
     }
   }
 
@@ -103,6 +136,60 @@ export function SpaceSettingsPanel({
             {error ? (
               <p role="alert" className="pt-2 text-body-sm text-destructive">
                 {error}
+              </p>
+            ) : null}
+          </SettingsRow>
+          <SettingsRow
+            label={
+              <label htmlFor={pathId}>
+                <Trans>Local project path</Trans>
+              </label>
+            }
+            control={
+              <div className="flex items-center gap-2">
+                <Input
+                  id={pathId}
+                  className="w-72"
+                  maxLength={1024}
+                  placeholder="E:\Projects\WebShop"
+                  value={pathDraft}
+                  disabled={pathPending}
+                  onChange={(event) => {
+                    setPathDraft(event.target.value);
+                    setPathError(null);
+                    setPathSaved(false);
+                  }}
+                  onBlur={() => void savePath()}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") event.stopPropagation();
+                    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+                    if (event.key === "Enter") {
+                      event.currentTarget.blur();
+                    }
+                    if (event.key === "Escape") {
+                      setPathDraft(space.localProjectPath ?? "");
+                      setPathError(null);
+                    }
+                  }}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={pathPending || pathDraft.trim() === (space.localProjectPath ?? "")}
+                  onClick={() => void savePath()}
+                >
+                  <Trans>Save</Trans>
+                </Button>
+              </div>
+            }
+          >
+            {pathError ? (
+              <p role="alert" className="pt-2 text-body-sm text-destructive">
+                {pathError}
+              </p>
+            ) : pathSaved ? (
+              <p className="pt-2 text-body-sm text-success">
+                <Trans>Project path saved</Trans>
               </p>
             ) : null}
           </SettingsRow>

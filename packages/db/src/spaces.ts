@@ -81,6 +81,7 @@ interface CreateSpaceInput {
   organizationId: string;
   userId: string;
   name: string;
+  localProjectPath?: string | null;
   createdAt: Date;
 }
 
@@ -90,6 +91,7 @@ async function createSpace(prisma: SpaceClient, input: CreateSpaceInput): Promis
       id: input.spaceId,
       organizationId: input.organizationId,
       name: input.name,
+      localProjectPath: input.localProjectPath?.trim() || null,
       createdByUserId: input.userId,
       createdAt: input.createdAt,
     },
@@ -140,9 +142,11 @@ export async function createSpaceForMember(
     currentSpaceId: string;
     userId: string;
     name: string;
+    localProjectPath?: string | null;
   },
-): Promise<{ id: string; name: string }> {
+): Promise<{ id: string; name: string; localProjectPath: string | null }> {
   const name = normalizeSpaceName(input.name);
+  const localProjectPath = input.localProjectPath?.trim() || null;
   const spaceId = randomUUID();
   const spaceMembershipId = randomUUID();
   const createdAt = new Date();
@@ -174,6 +178,7 @@ export async function createSpaceForMember(
           organizationId,
           userId: input.userId,
           name,
+          localProjectPath,
           createdAt,
         });
         await createSpaceDefaults(tx, {
@@ -186,7 +191,7 @@ export async function createSpaceForMember(
     ),
   );
 
-  return { id: spaceId, name };
+  return { id: spaceId, name, localProjectPath };
 }
 
 /**
@@ -890,6 +895,29 @@ export async function renameSpaceForMember(
           data: { name },
         });
         return { id: input.spaceId, name };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    ),
+  );
+}
+
+export async function setSpaceLocalProjectPathForMember(
+  prisma: PrismaClient,
+  input: SpaceMemberTargetInput & { localProjectPath: string | null },
+): Promise<{ id: string; localProjectPath: string | null }> {
+  const localProjectPath = input.localProjectPath?.trim() || null;
+  return withTransactionRetry(() =>
+    prisma.$transaction(
+      async (tx) => {
+        await lockSpaceDeletion(tx, input.spaceId);
+        const owned = await loadActorSpace(tx, input);
+        if (owned.role !== "owner") throw new CannotRenameSpaceAsNonOwnerError();
+        if (owned.deletingAt) throw new SpaceDeletionInProgressError();
+        await tx.space.update({
+          where: { id: input.spaceId },
+          data: { localProjectPath },
+        });
+        return { id: input.spaceId, localProjectPath };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     ),

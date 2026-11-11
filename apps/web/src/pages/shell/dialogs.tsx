@@ -35,7 +35,7 @@ export function NewSpaceDialog({
   onDone,
 }: {
   onCancel: () => void;
-  onCreate: (name: string) => Promise<string>;
+  onCreate: (name: string, localProjectPath?: string) => Promise<string>;
   /** The user's own skills, servers, plugins and tool sources, across their spaces. */
   loadItems: () => Promise<AccountItem[]>;
   chooseItems: (spaceId: string, items: AccountItem[]) => Promise<void>;
@@ -43,7 +43,9 @@ export function NewSpaceDialog({
 }) {
   const { t } = useLingui();
   const nameId = useId();
+  const pathId = useId();
   const [name, setName] = useState("");
+  const [projectPath, setProjectPath] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<{ id: string; items: AccountItem[] } | null>(null);
@@ -58,7 +60,7 @@ export function NewSpaceDialog({
     void (async () => {
       let spaceId: string;
       try {
-        spaceId = await onCreate(trimmed);
+        spaceId = await onCreate(trimmed, projectPath.trim() || undefined);
       } catch (reason) {
         setError(errorText(reason, t`Could not create space`));
         setSaving(false);
@@ -160,6 +162,17 @@ export function NewSpaceDialog({
               if (event.key === "Enter") create();
             }}
             placeholder={t`Customer support`}
+            className="mt-2"
+          />
+        </label>
+        <label htmlFor={pathId} className="mt-3 block text-body text-foreground/75">
+          <Trans>Local project path (optional)</Trans>
+          <Input
+            id={pathId}
+            maxLength={1024}
+            value={projectPath}
+            onChange={(event) => setProjectPath(event.target.value)}
+            placeholder="E:\Projects\WebShop"
             className="mt-2"
           />
         </label>
@@ -423,6 +436,7 @@ export function DeleteBotDialog({
 export type SettingsSpace = {
   id: string;
   name: string;
+  localProjectPath?: string | null;
   canRename?: boolean;
   canDelete?: boolean;
   /** Every bot deleting the space removes, from the server. */

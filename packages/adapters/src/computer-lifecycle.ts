@@ -438,7 +438,13 @@ export async function provisionComputer(
       });
     await mkdir(homePath, { recursive: true });
     await onProgress?.("recreating");
-    const owner = await computerOwnerLocale(deps.prisma, existing.userId);
+    const [owner, space] = await Promise.all([
+      computerOwnerLocale(deps.prisma, existing.userId),
+      deps.prisma.space.findUnique({
+        where: { id: existing.spaceId },
+        select: { localProjectPath: true },
+      }),
+    ]);
     const provisionAt = (startSize: ComputerSize | undefined) =>
       getLogger().withContext(
         { "computer.id": computerId, "run.id": context.runId, previousState: existing.state },
@@ -455,6 +461,7 @@ export async function provisionComputer(
                   ? undefined
                   : (existing.homeRevisionAt ?? undefined),
               size: startSize,
+              localProjectPath: space?.localProjectPath ?? undefined,
               ...owner,
             },
             context,
