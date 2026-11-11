@@ -114,6 +114,9 @@ x-app-environment: &app-environment # Runtime
   RAKAZO_LOCAL_MODELS:
   RAKAZO_LOCAL_MODELS_URL:
   RAKAZO_LOCAL_MODELS_API_KEY:
+  # Antigravity proxy: set to http://agy-proxy:8765/v1 when using the bundled proxy
+  # service, or http://host.docker.internal:8765/v1 for a proxy on the host machine.
+  RAKAZO_ANTIGRAVITY_PROXY_URL:
   # Where a localhost model or speech URL goes: the computer running Docker.
   RAKAZO_LOOPBACK_HOST: host.docker.internal
   RAKAZO_LOCAL_VISION_MODELS:
@@ -611,6 +614,40 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+  # Optional Antigravity proxy: routes OpenAI-compatible requests to Gemini API.
+  # Enabled when GEMINI_API_KEY is set in .env. Remove the profile to always start it.
+  agy-proxy:
+    image: node:22-alpine
+    profiles: ["agy"]
+    working_dir: /proxy
+    command: ["node", "src/index.js"]
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 256m
+    read_only: false
+    volumes:
+      - ../../tools/agy-proxy:/proxy:ro
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      AGY_PROXY_PORT: "8765"
+      AGY_DEFAULT_MODEL: ${AGY_DEFAULT_MODEL:-gemini-2.0-flash}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${AGY_PROXY_BIND:-127.0.0.1}:${AGY_PROXY_PORT:-8765}:8765"
+    networks:
+      - app
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8765/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
 volumes:
   pgdata:

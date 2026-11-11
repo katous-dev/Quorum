@@ -1,0 +1,15 @@
+{
+  "name": "@rakazo/agy-proxy",
+  "version": "0.1.0",
+  "description": "OpenAI-compatible proxy that forwards requests to Gemini API (for Antigravity integration)",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {}
+}

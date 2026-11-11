@@ -10,6 +10,12 @@ import type {
   ProviderHeaders,
 } from "@earendil-works/pi-ai";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
+import {
+  ANTIGRAVITY_CLIENT_HEADER,
+  ANTIGRAVITY_CLIENT_VALUE,
+  ANTIGRAVITY_PROVIDER,
+  ANTIGRAVITY_SESSION_HEADER,
+} from "./pi-antigravity-provider.js";
 import { codexComputeResidency } from "./pi-oauth.js";
 import {
   modelStreamIdleTimeoutMs,
@@ -310,6 +316,21 @@ export function reliableStreamOptions(
       headers: {
         "x-opencode-session": sessionId,
         "x-opencode-client": "rakazo",
+        ...next.headers,
+      },
+    };
+  }
+
+  // Antigravity proxy: inject session and client headers so the proxy can
+  // correlate streaming sessions and apply per-client routing if needed.
+  if (model.provider === ANTIGRAVITY_PROVIDER) {
+    const sessionId = next.sessionId?.trim() || randomUUID();
+    next = {
+      ...next,
+      sessionId,
+      headers: {
+        [ANTIGRAVITY_SESSION_HEADER]: sessionId,
+        [ANTIGRAVITY_CLIENT_HEADER]: ANTIGRAVITY_CLIENT_VALUE,
         ...next.headers,
       },
     };

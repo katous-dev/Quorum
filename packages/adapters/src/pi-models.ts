@@ -14,6 +14,7 @@ import {
 } from "@rakazo/contracts";
 import { cloudflareRoutingFields } from "./cloudflare-ai-gateway.js";
 import { COMPATIBLE_ENDPOINT_PRESETS } from "./openai-compatible-url.js";
+import { registerAntigravityProvider } from "./pi-antigravity-provider.js";
 import { LOCAL_PROVIDER_ID, registerLocalProvider } from "./pi-local-provider.js";
 import { applyPiModelCompatibility } from "./pi-model-compat.js";
 import { loadProviderOAuth, SUBSCRIPTION_SIGN_IN_PROVIDERS } from "./pi-oauth.js";
@@ -61,6 +62,7 @@ const RECOMMENDED_MODEL_IDS: Readonly<Record<string, string>> = {
   openrouter: "anthropic/claude-haiku-5.5",
   anthropic: "claude-haiku-5-5",
   google: "gemini-3.8-flash",
+  antigravity: "gemini-3.8-flash-high",
   groq: "openai/gpt-oss-120b",
   minimax: "MiniMax-M3",
 };
@@ -279,7 +281,9 @@ function buildPiCatalog(): PiCatalogEntry[] {
   catalogBaseUrls.clear();
   hiddenCatalogKeys.clear();
   const models = registerOpenAiCompatibleCatalog(
-    registerLocalProvider(applyPiModelCompatibility(builtinModels())),
+    registerAntigravityProvider(
+      registerLocalProvider(applyPiModelCompatibility(builtinModels())),
+    ),
   );
   const entries: PiCatalogEntry[] = [];
   for (const provider of models.getProviders()) {

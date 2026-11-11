@@ -10,18 +10,27 @@ import {
   normalizeOpenAiCompatibleBaseUrl,
   OPENAI_COMPATIBLE_PROVIDER_ID,
 } from "@rakazo/contracts";
+import { antigravityProxyBaseUrl } from "./pi-antigravity-provider.js";
 
 export { normalizeOpenAiCompatibleBaseUrl, OPENAI_COMPATIBLE_PROVIDER_ID };
 
 const BUILT_IN_PUBLIC_MODEL_HOSTS = new Set(["ollama.com"]);
 
+function buildCompatibleEndpointPresets(): CompatibleEndpointPreset[] {
+  const presets: CompatibleEndpointPreset[] = [{ name: "Ollama Cloud", baseUrl: "https://ollama.com/v1" }];
+  // Include the Antigravity proxy preset when it is configured for this deployment.
+  const agyUrl = antigravityProxyBaseUrl();
+  if (agyUrl) {
+    presets.unshift({ name: "Antigravity (local proxy)", baseUrl: agyUrl });
+  }
+  return presets;
+}
+
 /** Hosted compatible services the catalog offers by name. Each one needs a key. */
-export const COMPATIBLE_ENDPOINT_PRESETS: CompatibleEndpointPreset[] = [
-  { name: "Ollama Cloud", baseUrl: "https://ollama.com/v1" },
-];
+export const COMPATIBLE_ENDPOINT_PRESETS: CompatibleEndpointPreset[] = buildCompatibleEndpointPresets();
 
 export function compatibleEndpointPreset(baseUrl: string | undefined) {
-  return matchCompatibleEndpointPreset(COMPATIBLE_ENDPOINT_PRESETS, baseUrl);
+  return matchCompatibleEndpointPreset(buildCompatibleEndpointPresets(), baseUrl);
 }
 
 export function openAiCompatAllowPublicHosts(): boolean {

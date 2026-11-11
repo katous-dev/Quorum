@@ -19,11 +19,13 @@ import { getLogger } from "@rakazo/logging";
 import type { StoredModelSecret } from "./model-secret.js";
 import { parseModelSecret, serializeModelSecret } from "./model-secret.js";
 import { createManualAnthropicOAuthLogin } from "./pi-anthropic-oauth.js";
+import { createManualAntigravityOAuthLogin } from "./pi-antigravity-oauth.js";
 
 export const CHATGPT_OAUTH_PROVIDER = "openai-codex";
 export const COPILOT_OAUTH_PROVIDER = "github-copilot";
 export const XAI_OAUTH_PROVIDER = "xai";
 export const ANTHROPIC_OAUTH_PROVIDER = "anthropic";
+export const ANTIGRAVITY_PROVIDER = "antigravity";
 
 export const SUBSCRIPTION_SIGN_IN_PROVIDERS: Record<
   string,
@@ -59,6 +61,12 @@ export const SUBSCRIPTION_SIGN_IN_PROVIDERS: Record<
     hint: "Claude Pro/Max / key",
     // Button + "Or paste an API key" already explain the choices; no extra paragraph.
     billing: "",
+  },
+  [ANTIGRAVITY_PROVIDER]: {
+    mode: "auth-url",
+    loginLabel: "Connect Antigravity",
+    hint: "AGY / Gemini key",
+    billing: "Connects to your Antigravity local proxy or Gemini subscription.",
   },
 };
 
@@ -442,6 +450,15 @@ export function codexComputeResidency(accessToken: string | undefined): string |
 export function loadProviderOAuth(providerId: string): OAuthAuth | undefined {
   // pi 1.3 adds ChatGPT OAuth to OpenAI; keep subscription sign-in on Codex.
   if (providerId === "openai") return undefined;
+  if (providerId === ANTIGRAVITY_PROVIDER) {
+    return {
+      name: "Antigravity",
+      loginLabel: "Connect Antigravity",
+      isSubscription: true,
+      refresh: async (credential) => credential,
+      toAuth: async (credential) => ({ apiKey: credential.access }),
+    };
+  }
   return providerCatalog().getProvider(canonicalPiProviderId(providerId))?.auth.oauth;
 }
 
@@ -1094,6 +1111,9 @@ function defaultLogin(
       codePage: options.codePage,
       ...(verifier ? { createVerifier: () => verifier } : {}),
     })(interaction);
+  }
+  if (providerId === ANTIGRAVITY_PROVIDER) {
+    return createManualAntigravityOAuthLogin()(interaction);
   }
   return builtinModels().login(providerId, type, interaction);
 }
