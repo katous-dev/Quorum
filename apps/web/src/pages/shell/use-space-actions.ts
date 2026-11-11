@@ -14,6 +14,7 @@ export function useSpaceActions({
   refreshBots,
   bootstrapMe,
   closePanel,
+  navigate,
 }: {
   rpc: ReturnType<typeof createSpaceRpc>;
   alive: RefObject<boolean>;
@@ -21,6 +22,7 @@ export function useSpaceActions({
   refreshBots: Roster["refreshBots"];
   bootstrapMe: Roster["bootstrapMe"];
   closePanel: () => void;
+  navigate?: (path: string) => void;
 }) {
   async function renameSpace(spaceId: string, name: string) {
     await commitSpaceRename({
@@ -42,10 +44,13 @@ export function useSpaceActions({
     closePanel();
     const effectiveSpaceId = selectedSpaceId() ?? bootstrapMe?.spaceId;
     if (effectiveSpaceId === spaceId) {
-      // The auth boundary changed, so reload like a space switch.
       if (selectSpace(result.activeSpaceId)) {
-        window.location.assign("/app");
-        return;
+        if (navigate) {
+          navigate("/app");
+        } else {
+          window.location.assign("/app");
+          return;
+        }
       }
     }
     await refreshBots(true);
@@ -53,10 +58,13 @@ export function useSpaceActions({
 
   async function leftSpace(spaceId: string, activeSpaceId: string) {
     const effectiveSpaceId = selectedSpaceId() ?? bootstrapMe?.spaceId;
-    // Leaving the open space changes the auth boundary, so reload like a space switch.
     if (effectiveSpaceId === spaceId && selectSpace(activeSpaceId)) {
-      window.location.assign("/app");
-      return;
+      if (navigate) {
+        navigate("/app");
+      } else {
+        window.location.assign("/app");
+        return;
+      }
     }
     await refreshBots(true);
   }

@@ -878,6 +878,7 @@ function SpaceShell() {
     refreshBots,
     bootstrapMe,
     closePanel: () => setPanel(null),
+    navigate,
   });
 
   function openCreatedBot(bot: Bot) {

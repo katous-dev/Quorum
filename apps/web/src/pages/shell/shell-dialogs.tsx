@@ -356,14 +356,27 @@ export function ShellDialogs({
               items: items.map(({ kind, id }) => ({ kind, id })),
             });
           }}
-          onDone={(spaceId) => {
+          onDone={async (spaceId) => {
             if (!alive.current) return;
+            setNewSpaceOpen(false);
             if (!selectSpace(spaceId)) {
-              setNewSpaceOpen(false);
               void refreshBots();
               return;
             }
-            window.location.assign("/onboarding");
+            try {
+              const bot = await rpc.bots.create({
+                name: "Chief",
+                description: "",
+                instructions: "",
+                notifyOnFinish: true,
+                spawnKey: "onboarding:first",
+              });
+              await refreshBots(true);
+              navigate(`/app/${bot.id}`);
+            } catch {
+              await refreshBots(true);
+              navigate("/app");
+            }
           }}
         />
       ) : null}
