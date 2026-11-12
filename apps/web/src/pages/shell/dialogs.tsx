@@ -13,9 +13,10 @@ import {
   RadioGroup,
   RadioGroupItem,
 } from "@rakazo/ui-web";
-import { Lock } from "lucide-react";
+import { FolderOpen, Lock } from "lucide-react";
 import { useId, useState } from "react";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { FolderBrowserModal } from "../../components/FolderBrowserModal";
 import { errorText } from "../../lib/user-error";
 
 /** Each dialog is mounted only while open, so `open` is always true and the
@@ -47,10 +48,15 @@ export function NewSpaceDialog({
   const [name, setName] = useState("");
   const [projectPath, setProjectPath] = useState("");
   const [saving, setSaving] = useState(false);
+  const [browserOpen, setBrowserOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<{ id: string; items: AccountItem[] } | null>(null);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const key = (item: AccountItem) => `${item.kind}:${item.id}`;
+
+  const handleBrowse = () => {
+    setBrowserOpen(true);
+  };
 
   const create = () => {
     const trimmed = name.trim();
@@ -61,6 +67,13 @@ export function NewSpaceDialog({
       let spaceId: string;
       try {
         spaceId = await onCreate(trimmed, projectPath.trim() || undefined);
+        if (projectPath.trim()) {
+          void fetch("/api/spaces/project-path", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ spaceId, path: projectPath.trim() }),
+          }).catch(() => {});
+        }
       } catch (reason) {
         setError(errorText(reason, t`Could not create space`));
         setSaving(false);
@@ -134,59 +147,81 @@ export function NewSpaceDialog({
     );
 
   return (
-    <Dialog open onOpenChange={closeUnlessBusy(saving, onCancel)}>
-      <DialogContent showCloseButton={false}>
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2.5">
-            <Lock
-              size={17}
-              strokeWidth={1.8}
-              className="text-muted-foreground"
-              aria-hidden="true"
+    <>
+      <Dialog open onOpenChange={closeUnlessBusy(saving, onCancel)}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2.5">
+              <Lock
+                size={17}
+                strokeWidth={1.8}
+                className="text-muted-foreground"
+                aria-hidden="true"
+              />
+              <Trans>New space</Trans>
+            </DialogTitle>
+          </DialogHeader>
+          <label htmlFor={nameId} className="block text-body text-foreground/75">
+            <Trans>Name</Trans>
+            <Input
+              id={nameId}
+              maxLength={60}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing || event.keyCode === 229) {
+                  if (event.key === "Escape") event.stopPropagation();
+                  return;
+                }
+                if (event.key === "Enter") create();
+              }}
+              placeholder={t`Customer support`}
+              className="mt-2"
             />
-            <Trans>New space</Trans>
-          </DialogTitle>
-        </DialogHeader>
-        <label htmlFor={nameId} className="block text-body text-foreground/75">
-          <Trans>Name</Trans>
-          <Input
-            id={nameId}
-            maxLength={60}
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.nativeEvent.isComposing || event.keyCode === 229) {
-                if (event.key === "Escape") event.stopPropagation();
-                return;
-              }
-              if (event.key === "Enter") create();
-            }}
-            placeholder={t`Customer support`}
-            className="mt-2"
-          />
-        </label>
-        <label htmlFor={pathId} className="mt-3 block text-body text-foreground/75">
-          <Trans>Local project path (optional)</Trans>
-          <Input
-            id={pathId}
-            maxLength={1024}
-            value={projectPath}
-            onChange={(event) => setProjectPath(event.target.value)}
-            placeholder="E:\Projects\WebShop"
-            className="mt-2"
-          />
-        </label>
-        {error ? <p className="text-body text-destructive">{error}</p> : null}
-        <DialogFooter>
-          <Button variant="outline" disabled={saving} onClick={onCancel}>
-            <Trans>Cancel</Trans>
-          </Button>
-          <Button disabled={saving || !name.trim()} onClick={create}>
-            {saving ? <Trans>Creating…</Trans> : <Trans>Create space</Trans>}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </label>
+          <label htmlFor={pathId} className="mt-3 block text-body text-foreground/75">
+            <Trans>Local project path (optional)</Trans>
+            <div className="mt-2 flex items-center gap-2">
+              <Input
+                id={pathId}
+                maxLength={1024}
+                value={projectPath}
+                disabled={saving}
+                onChange={(event) => setProjectPath(event.target.value)}
+                placeholder="E:\Projects\WebShop"
+                className="flex-1"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                type="button"
+                disabled={saving}
+                onClick={handleBrowse}
+                aria-label="Choose folder"
+              >
+                <FolderOpen size={14} className="me-1.5" />
+                <Trans>Choose folder</Trans>
+              </Button>
+            </div>
+          </label>
+          {error ? <p className="text-body text-destructive">{error}</p> : null}
+          <DialogFooter>
+            <Button variant="outline" disabled={saving} onClick={onCancel}>
+              <Trans>Cancel</Trans>
+            </Button>
+            <Button disabled={saving || !name.trim()} onClick={create}>
+              {saving ? <Trans>Creating…</Trans> : <Trans>Create space</Trans>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <FolderBrowserModal
+        open={browserOpen}
+        initialPath={projectPath}
+        onClose={() => setBrowserOpen(false)}
+        onSelect={(selected) => setProjectPath(selected)}
+      />
+    </>
   );
 }
 

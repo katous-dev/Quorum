@@ -119,6 +119,44 @@ function sharedPageHeaders(req: IncomingMessage, res: ServerResponse, next: () =
   next();
 }
 
+function attachFolderPicker(server: ViteDevServer | PreviewServer) {
+  server.middlewares.use(async (req, res, next) => {
+    const pathname = req.url?.split("?")[0];
+    if (
+      pathname === "/api/browse-folder" ||
+      pathname?.startsWith("/api/fs/") ||
+      pathname?.startsWith("/api/spaces/") ||
+      pathname === "/rpc/spaces.setLocalProjectPath"
+    ) {
+      try {
+        const bridgeBase = process.env.LOCAL_BRIDGE_URL ?? "http://host.docker.internal:8765";
+        const upstreamUrl = `${bridgeBase}${req.url}`;
+        let body: string | undefined;
+        if (req.method === "POST") {
+          const chunks: Buffer[] = [];
+          for await (const chunk of req) chunks.push(Buffer.from(chunk));
+          body = Buffer.concat(chunks).toString();
+        }
+        const upstream = await fetch(upstreamUrl, {
+          method: req.method,
+          headers: { "Content-Type": "application/json" },
+          body,
+        });
+        const data = await upstream.text();
+        res.writeHead(upstream.status, { "Content-Type": "application/json" });
+        res.end(data);
+      } catch (err) {
+        res.writeHead(502, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }),
+        );
+      }
+      return;
+    }
+    next();
+  });
+}
+
 function attachNovncProxy(server: ViteDevServer | PreviewServer, secret: string, api: string) {
   server.middlewares.use(async (req, res, next) => {
     const path = novncRequestPath(req.url);
@@ -678,6 +716,11 @@ export default defineConfig(({ command, mode }) => {
         name: "rakazo-novnc-proxy",
         configureServer: (server) => attachNovncProxy(server, screenProxySecret(), api),
         configurePreviewServer: (server) => attachNovncProxy(server, screenProxySecret(), api),
+      },
+      {
+        name: "rakazo-folder-picker",
+        configureServer: (server) => attachFolderPicker(server),
+        configurePreviewServer: (server) => attachFolderPicker(server),
       },
     ],
     server: {

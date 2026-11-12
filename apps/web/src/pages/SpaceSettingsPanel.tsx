@@ -1,9 +1,10 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Button, Input } from "@rakazo/ui-web";
+import { FolderOpen } from "lucide-react";
 import { useEffect, useId, useState } from "react";
+import { FolderBrowserModal } from "../components/FolderBrowserModal";
 import { SettingsGroup, SettingsRow } from "../components/SettingsRows";
 import { SpaceMembersSettings } from "../components/SpaceMembersSettings";
-import { useSpaceRpc } from "../lib/space-rpc";
 import { SpaceSettingOverrides } from "./SpaceSettingOverrides";
 import type { SettingsSpace } from "./shell/dialogs";
 import { DeleteSpaceDialog } from "./shell/dialogs";
@@ -29,7 +30,6 @@ export function SpaceSettingsPanel({
   onBusyChange?: (busy: boolean) => void;
 }) {
   const { t } = useLingui();
-  const rpc = useSpaceRpc();
   const nameId = useId();
   const pathId = useId();
   const [draft, setDraft] = useState(space.name);
@@ -39,13 +39,32 @@ export function SpaceSettingsPanel({
   const [pathPending, setPathPending] = useState(false);
   const [pathError, setPathError] = useState<string | null>(null);
   const [pathSaved, setPathSaved] = useState(false);
+  const [browserOpen, setBrowserOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [overridesBusy, setOverridesBusy] = useState(false);
   // A rename in flight holds the dialog open, so a failure is shown instead of lost on leaving.
-  const busy = pending || pathPending || overridesBusy;
+  const busy = pending || pathPending || browserOpen || overridesBusy;
   useEffect(() => {
     onBusyChange?.(busy);
   }, [busy, onBusyChange]);
+
+  useEffect(() => {
+    if (!pathDraft && space.id) {
+      void fetch(`/api/spaces/project-path?spaceId=${encodeURIComponent(space.id)}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.ok && data.path) {
+            setPathDraft(data.path);
+            space.localProjectPath = data.path;
+          }
+        })
+        .catch(() => {});
+    }
+  }, [space.id]);
+
+  function handleBrowse() {
+    setBrowserOpen(true);
+  }
 
   async function save() {
     const trimmed = draft.trim();
@@ -81,10 +100,14 @@ export function SpaceSettingsPanel({
     setPathError(null);
     setPathSaved(false);
     try {
-      await rpc.spaces.setLocalProjectPath({
-        spaceId: space.id,
-        path: trimmed || null,
+      const res = await fetch("/api/spaces/project-path", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spaceId: space.id, path: trimmed || null }),
       });
+      if (!res.ok) {
+        throw new Error(t`Could not save project path`);
+      }
       space.localProjectPath = trimmed || null;
       setPathSaved(true);
     } catch (err) {
@@ -175,6 +198,17 @@ export function SpaceSettingsPanel({
                 <Button
                   size="sm"
                   variant="outline"
+                  type="button"
+                  disabled={pathPending}
+                  onClick={handleBrowse}
+                  aria-label="Choose folder"
+                >
+                  <FolderOpen size={14} className="me-1.5" />
+                  <Trans>Choose folder</Trans>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
                   disabled={pathPending || pathDraft.trim() === (space.localProjectPath ?? "")}
                   onClick={() => void savePath()}
                 >
@@ -213,6 +247,15 @@ export function SpaceSettingsPanel({
           onConfirm={onDelete}
         />
       ) : null}
+      <FolderBrowserModal
+        open={browserOpen}
+        initialPath={pathDraft}
+        onClose={() => setBrowserOpen(false)}
+        onSelect={(selected) => {
+          setPathDraft(selected);
+          setPathSaved(false);
+        }}
+      />
     </div>
   );
 }

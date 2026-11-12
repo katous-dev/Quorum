@@ -10,10 +10,23 @@
  * @module agy-proxy
  */
 
-import { createServer } from "node:http";
+import { execSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const DATA_DIR = path.resolve(MODULE_DIR, "../data");
+const SPACE_PROJECTS_FILE = path.join(DATA_DIR, "space-projects.json");
+
+process.on("uncaughtException", (err) => {
+  console.error("[agy-proxy] [FATAL] Uncaught exception:", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[agy-proxy] [WARN] Unhandled rejection:", reason);
+});
 
 // ---------------------------------------------------------------------------
 // Config
@@ -25,7 +38,8 @@ const LOG_LEVEL = process.env.LOG_LEVEL ?? "info";
 
 // Locate agy.exe
 const DEFAULT_AGY_PATH = `${process.env.LOCALAPPDATA ?? "C:\\Users\\hungd\\AppData\\Local"}\\agy\\bin\\agy.exe`;
-const AGY_BIN = process.env.AGY_BIN_PATH ?? (existsSync(DEFAULT_AGY_PATH) ? DEFAULT_AGY_PATH : "agy");
+const AGY_BIN =
+  process.env.AGY_BIN_PATH ?? (existsSync(DEFAULT_AGY_PATH) ? DEFAULT_AGY_PATH : "agy");
 
 // Optional Gemini API fallback
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
@@ -69,7 +83,7 @@ const MODEL_ALIASES = {
   "gpt-4o": "gemini-3.8-flash-high",
   "gpt-4o-mini": "gemini-3.8-flash-medium",
   "gpt-4": "gemini-3.8-flash-high",
-  "default": DEFAULT_MODEL,
+  default: DEFAULT_MODEL,
 };
 
 function resolveAgyModel(modelName) {
@@ -91,7 +105,8 @@ function messagesToPrompt(messages) {
 
   const parts = [];
   for (const m of messages) {
-    const role = m.role === "system" ? "System instruction" : m.role === "assistant" ? "Assistant" : "User";
+    const role =
+      m.role === "system" ? "System instruction" : m.role === "assistant" ? "Assistant" : "User";
     const text = extractContentText(m.content);
     if (text) {
       parts.push(`[${role}]:\n${text}`);
@@ -136,9 +151,12 @@ const conversationMap = new Map();
 
 function runAgyCli(prompt, model, options = {}) {
   const args = [
-    "-p", prompt,
-    "--output-format", "stream-json",
-    "--model", model,
+    "-p",
+    prompt,
+    "--output-format",
+    "stream-json",
+    "--model",
+    model,
     "--dangerously-skip-permissions",
   ];
 
@@ -153,6 +171,42 @@ function runAgyCli(prompt, model, options = {}) {
   });
 
   return proc;
+}
+
+// ---------------------------------------------------------------------------
+// Native Folder Picker
+// ---------------------------------------------------------------------------
+
+function pickFolder(initialPath = "") {
+  return new Promise((resolve) => {
+    const scriptPath = path.resolve(import.meta.dirname, "pick-folder.ps1");
+    const args = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath];
+    if (initialPath) {
+      args.push("-InitialPath", initialPath);
+    }
+
+    log("info", `Running folder picker script: ${scriptPath}`);
+    const ps = spawn("powershell.exe", args, {
+      windowsHide: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let output = "";
+
+    ps.stdout.on("data", (d) => {
+      output += d.toString("utf8");
+    });
+    ps.stderr.on("data", (d) => {
+      log("warn", `pickFolder stderr: ${d.toString("utf8")}`);
+    });
+    ps.on("close", (code) => {
+      log("info", `pickFolder closed with code ${code}, result: "${output.trim()}"`);
+      resolve(output.trim() || null);
+    });
+    ps.on("error", (err) => {
+      log("error", "pickFolder spawn error:", err);
+      resolve(null);
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -204,6 +258,199 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  // File system directory browser for web modal
+  if (url.pathname === "/api/fs/list" && req.method === "GET") {
+    const requestedPath = url.searchParams.get("path") || "";
+    const drives = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+      .split("")
+      .map((l) => `${l}:`)
+      .filter((d) => {
+        try {
+          return existsSync(`${d}\\`);
+        } catch {
+          return false;
+        }
+      });
+
+    if (!requestedPath) {
+      sendJson(res, 200, {
+        ok: true,
+        drives,
+        current: "",
+        parent: null,
+        directories: drives.map((d) => ({ name: `${d}\\`, path: `${d}\\` })),
+      });
+      return;
+    }
+
+    let normalized = requestedPath.replace(/\//g, "\\");
+    if (/^[a-zA-Z]:$/.test(normalized)) {
+      normalized += "\\";
+    }
+
+    try {
+      if (!existsSync(normalized)) {
+        sendJson(res, 200, {
+          ok: false,
+          error: "Path does not exist",
+          drives,
+          current: normalized,
+          parent: null,
+          directories: [],
+        });
+        return;
+      }
+
+      const entries = readdirSync(normalized, { withFileTypes: true });
+      const directories = entries
+        .filter((entry) => {
+          if (!entry.isDirectory()) return false;
+          const name = entry.name;
+          if (name.startsWith(".") || name.startsWith("$")) return false;
+          if (name.toLowerCase() === "system volume information") return false;
+          return true;
+        })
+        .map((entry) => {
+          const joined = normalized.endsWith("\\")
+            ? `${normalized}${entry.name}`
+            : `${normalized}\\${entry.name}`;
+          return {
+            name: entry.name,
+            path: joined,
+          };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+
+      let parent = path.dirname(normalized);
+      if (parent === normalized || normalized.length <= 3) {
+        parent = "";
+      }
+
+      sendJson(res, 200, {
+        ok: true,
+        drives,
+        current: normalized,
+        parent,
+        directories,
+      });
+    } catch (err) {
+      sendJson(res, 200, {
+        ok: false,
+        error: err.message,
+        drives,
+        current: normalized,
+        parent: "",
+        directories: [],
+      });
+    }
+    return;
+  }
+
+  // Get or Set local project path for a space
+  if (
+    url.pathname === "/api/spaces/project-path" ||
+    url.pathname === "/rpc/spaces.setLocalProjectPath"
+  ) {
+    const dataDir = DATA_DIR;
+    const spaceProjectsFile = SPACE_PROJECTS_FILE;
+
+    if (req.method === "GET") {
+      const spaceId = url.searchParams.get("spaceId") || "";
+      let foundPath = null;
+      try {
+        if (existsSync(spaceProjectsFile)) {
+          const map = JSON.parse(readFileSync(spaceProjectsFile, "utf8"));
+          foundPath = map[spaceId] || null;
+        }
+      } catch {}
+
+      if (!foundPath && spaceId) {
+        try {
+          const out = execSync(
+            `docker exec rakazo-postgres-1 psql -U rakazo -d rakazo -t -A -c "SELECT \\"localProjectPath\\" FROM spaces WHERE id = '${spaceId.replace(/'/g, "''")}';"`,
+            { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+          ).trim();
+          if (out) foundPath = out;
+        } catch {}
+      }
+
+      sendJson(res, 200, { ok: true, spaceId, path: foundPath });
+      return;
+    }
+
+    if (req.method === "POST") {
+      let body = {};
+      try {
+        const raw = await readBody(req);
+        body = JSON.parse(raw);
+      } catch {}
+
+      const spaceId = body.spaceId || "";
+      const projectPath = body.path || null;
+
+      if (!spaceId) {
+        sendJson(res, 400, { ok: false, error: "Missing spaceId" });
+        return;
+      }
+
+      try {
+        if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
+        let map = {};
+        if (existsSync(spaceProjectsFile)) {
+          try {
+            map = JSON.parse(readFileSync(spaceProjectsFile, "utf8"));
+          } catch {}
+        }
+        if (projectPath) {
+          map[spaceId] = projectPath;
+        } else {
+          delete map[spaceId];
+        }
+        writeFileSync(spaceProjectsFile, JSON.stringify(map, null, 2), "utf8");
+      } catch (err) {
+        log("error", "Failed to save space project path:", err.message);
+      }
+
+      // Also persist to Postgres
+      try {
+        const sql = projectPath
+          ? `UPDATE spaces SET \\"localProjectPath\\" = '${projectPath.replace(/'/g, "''")}' WHERE id = '${spaceId.replace(/'/g, "''")}';`
+          : `UPDATE spaces SET \\"localProjectPath\\" = NULL WHERE id = '${spaceId.replace(/'/g, "''")}';`;
+        execSync(`docker exec rakazo-postgres-1 psql -U rakazo -d rakazo -c "${sql}"`, {
+          stdio: "ignore",
+        });
+        log("info", `Updated space ${spaceId} localProjectPath: ${projectPath}`);
+      } catch (err) {
+        log("warn", "Postgres sync warning:", err.message);
+      }
+
+      sendJson(res, 200, { ok: true, id: spaceId, localProjectPath: projectPath });
+      return;
+    }
+  }
+
+  // Browse folder popup (Windows native FolderBrowserDialog)
+  if (
+    (url.pathname === "/api/browse-folder" || url.pathname === "/v1/browse-folder") &&
+    (req.method === "GET" || req.method === "POST")
+  ) {
+    let currentPath = "";
+    if (req.method === "POST") {
+      try {
+        const raw = await readBody(req);
+        if (raw) {
+          const body = JSON.parse(raw);
+          if (typeof body.current === "string") currentPath = body.current;
+        }
+      } catch {}
+    }
+    log("info", `Opening native Windows folder browser popup (initialPath: "${currentPath}")...`);
+    const selected = await pickFolder(currentPath);
+    log("info", "Selected folder:", selected);
+    sendJson(res, 200, { ok: true, path: selected });
+    return;
+  }
+
   // Models list
   if (url.pathname === "/v1/models" && req.method === "GET") {
     const models = AGY_MODELS.map((m) => ({
@@ -215,7 +462,12 @@ const server = createServer(async (req, res) => {
     // Also include common aliases
     for (const [alias, target] of Object.entries(MODEL_ALIASES)) {
       if (!models.some((m) => m.id === alias)) {
-        models.push({ id: alias, object: "model", created: 1700000000, owned_by: "google-antigravity" });
+        models.push({
+          id: alias,
+          object: "model",
+          created: 1700000000,
+          owned_by: "google-antigravity",
+        });
       }
     }
     sendJson(res, 200, { object: "list", data: models });
@@ -240,7 +492,9 @@ const server = createServer(async (req, res) => {
     const prompt = messagesToPrompt(body.messages ?? []);
 
     if (!prompt) {
-      sendJson(res, 400, { error: { message: "No prompt content found in messages", type: "invalid_request_error" } });
+      sendJson(res, 400, {
+        error: { message: "No prompt content found in messages", type: "invalid_request_error" },
+      });
       return;
     }
 
@@ -248,7 +502,10 @@ const server = createServer(async (req, res) => {
     const sessionKey = req.headers["x-agy-session"];
     const conversationId = sessionKey ? conversationMap.get(sessionKey) : undefined;
 
-    log("info", `${stream ? "stream" : "sync"} → Antigravity [${agyModel}] (requested: ${requestedModel})`);
+    log(
+      "info",
+      `${stream ? "stream" : "sync"} → Antigravity [${agyModel}] (requested: ${requestedModel})`,
+    );
 
     const proc = runAgyCli(prompt, agyModel, { conversationId });
 
@@ -256,7 +513,7 @@ const server = createServer(async (req, res) => {
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
+        Connection: "keep-alive",
         "Access-Control-Allow-Origin": "*",
       });
 
@@ -303,14 +560,18 @@ const server = createServer(async (req, res) => {
 
       proc.on("close", (code) => {
         if (!sentAny && code !== 0) {
-          res.write(openAiChunk(requestId, agyModel, `[Antigravity CLI error: exit code ${code}]`, "stop"));
+          res.write(
+            openAiChunk(requestId, agyModel, `[Antigravity CLI error: exit code ${code}]`, "stop"),
+          );
           res.write("data: [DONE]\n\n");
         }
         res.end();
       });
 
       req.on("close", () => {
-        try { proc.kill(); } catch {}
+        try {
+          proc.kill();
+        } catch {}
       });
     } else {
       // Non-streaming
@@ -339,7 +600,9 @@ const server = createServer(async (req, res) => {
           conversationMap.set(sessionKey, capturedConvId);
         }
         if (code !== 0 && !accumulatedText) {
-          sendJson(res, 502, { error: { message: `Antigravity CLI exited with code ${code}`, type: "upstream_error" } });
+          sendJson(res, 502, {
+            error: { message: `Antigravity CLI exited with code ${code}`, type: "upstream_error" },
+          });
           return;
         }
         sendJson(res, 200, {
@@ -347,7 +610,13 @@ const server = createServer(async (req, res) => {
           object: "chat.completion",
           created: Math.floor(Date.now() / 1000),
           model: agyModel,
-          choices: [{ index: 0, message: { role: "assistant", content: accumulatedText }, finish_reason: "stop" }],
+          choices: [
+            {
+              index: 0,
+              message: { role: "assistant", content: accumulatedText },
+              finish_reason: "stop",
+            },
+          ],
           usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
         });
       });
@@ -356,7 +625,9 @@ const server = createServer(async (req, res) => {
   }
 
   // 404
-  sendJson(res, 404, { error: { message: `Not found: ${url.pathname}`, type: "invalid_request_error" } });
+  sendJson(res, 404, {
+    error: { message: `Not found: ${url.pathname}`, type: "invalid_request_error" },
+  });
 });
 
 server.listen(PORT, "0.0.0.0", () => {

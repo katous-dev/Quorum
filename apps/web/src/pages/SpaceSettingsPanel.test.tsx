@@ -9,11 +9,43 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@lingui/react/macro", () => {
   const t = (parts: TemplateStringsArray, ...values: unknown[]) =>
     parts.reduce((text, part, index) => `${text}${index > 0 ? values[index - 1] : ""}${part}`, "");
+  const _ = (desc: any) => desc?.message ?? desc?.id ?? String(desc);
   return {
-    useLingui: () => ({ t }),
-    Trans: ({ children }: { children: ReactNode }) => children,
+    useLingui: () => ({ t, _: _, i18n: { _: _ } }),
+    Trans: (props: any) => {
+      if (props.message?.includes("plural")) {
+        const { botCount, name } = props.values ?? {};
+        return botCount === 1
+          ? `Delete ${name} and its 1 bot?`
+          : `Delete ${name} and its ${botCount} bots?`;
+      }
+      if (props.message?.includes("Delete {0}?")) {
+        return `Delete ${props.values?.[0] ?? "Support"}?`;
+      }
+      return props.children ?? props.message ?? props.id ?? null;
+    },
     Plural: ({ value, one, other }: { value: number; one: string; other: string }) =>
       (value === 1 ? one : other).replace("#", String(value)),
+  };
+});
+vi.mock("@lingui/react", () => {
+  const t = (parts: TemplateStringsArray, ...values: unknown[]) =>
+    parts.reduce((text, part, index) => `${text}${index > 0 ? values[index - 1] : ""}${part}`, "");
+  const _ = (desc: any) => desc?.message ?? desc?.id ?? String(desc);
+  return {
+    useLingui: () => ({ t, _: _, i18n: { _: _ } }),
+    Trans: (props: any) => {
+      if (props.message?.includes("plural")) {
+        const { botCount, name } = props.values ?? {};
+        return botCount === 1
+          ? `Delete ${name} and its 1 bot?`
+          : `Delete ${name} and its ${botCount} bots?`;
+      }
+      if (props.message?.includes("Delete {0}?")) {
+        return `Delete ${props.values?.[0] ?? "Support"}?`;
+      }
+      return props.children ?? props.message ?? props.id ?? null;
+    },
   };
 });
 vi.mock("@rakazo/ui-web", () => {
@@ -245,5 +277,19 @@ describe("SpaceSettingsPanel", () => {
     await render({});
     await click("Delete space");
     expect(container.querySelector("h2")?.textContent).toBe("Delete Support?");
+  });
+
+  it("renders choose folder button and saves project path", async () => {
+    await render({
+      space: {
+        id: "space-a",
+        name: "Support",
+        canRename: true,
+        canDelete: true,
+        localProjectPath: "E:\\Old",
+      },
+    });
+    expect(button("Choose folder")).toBeDefined();
+    expect(button("Save")).toBeDefined();
   });
 });
